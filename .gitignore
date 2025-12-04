@@ -1,0 +1,13 @@
+# Java / IDE artifacts
+/out/
+/data/
+*.class
+*.log
+hs_err_pid*
+
+# IDE directories
+.vscode/
+.idea/
+.classpath
+.project
+.settings/
