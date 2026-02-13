@@ -1,0 +1,128 @@
+package com.schoolmgmt.config;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Locale;
+import java.util.Optional;
+import java.util.Properties;
+
+public record AppConfig(
+        PersistenceMode persistenceMode,
+        Path dataFilePath,
+        String jdbcUrl,
+        String jdbcUsername,
+        String jdbcPassword,
+        long autoSaveIntervalMillis
+) {
+
+    private static final String DEFAULT_DATA_FILE = "data/school-records.bin";
+    private static final String DEFAULT_JDBC_URL = "jdbc:postgresql://localhost:5432/schlmngment";
+    private static final String DEFAULT_JDBC_USERNAME = "postgres";
+    private static final String DEFAULT_JDBC_PASSWORD = "postgres";
+    private static final long DEFAULT_AUTO_SAVE_INTERVAL = 10_000L;
+    private static final Properties FILE_PROPERTIES = loadFileProperties();
+    private static final String[] PROPERTY_CANDIDATES = {
+            "config/schoolmgmt.properties",
+            "config/application.properties",
+            "schoolmgmt.properties",
+            "application.properties"
+    };
+
+    public static AppConfig load() {
+        PersistenceMode mode = resolvePersistenceMode();
+        Path filePath = Path.of(resolveProperty("schoolmgmt.datafile", "SCHOOLMGMT_DATAFILE")
+                .orElse(DEFAULT_DATA_FILE));
+        String jdbcUrl = resolveProperty("schoolmgmt.jdbc.url", "SCHOOLMGMT_JDBC_URL")
+                .orElse(DEFAULT_JDBC_URL);
+        String jdbcUsername = resolveProperty("schoolmgmt.jdbc.username", "SCHOOLMGMT_JDBC_USERNAME")
+                .orElse(DEFAULT_JDBC_USERNAME);
+        String jdbcPassword = resolveProperty("schoolmgmt.jdbc.password", "SCHOOLMGMT_JDBC_PASSWORD")
+                .orElse(DEFAULT_JDBC_PASSWORD);
+        long interval = resolveProperty("schoolmgmt.autosave.interval", "SCHOOLMGMT_AUTOSAVE_INTERVAL")
+                .map(AppConfig::parseLongSafely)
+                .orElse(DEFAULT_AUTO_SAVE_INTERVAL);
+
+        if (interval < 0) {
+            interval = DEFAULT_AUTO_SAVE_INTERVAL;
+        }
+
+        return new AppConfig(mode, filePath, jdbcUrl, jdbcUsername, jdbcPassword, interval);
+    }
+
+    private static PersistenceMode resolvePersistenceMode() {
+        String configured = resolveProperty("schoolmgmt.persistence", "SCHOOLMGMT_PERSISTENCE")
+                .map(value -> value.toUpperCase(Locale.ROOT))
+                .orElse(null);
+
+        if (configured == null) {
+            return PersistenceMode.FILE;
+        }
+
+        try {
+            return PersistenceMode.valueOf(configured);
+        } catch (IllegalArgumentException ex) {
+            return PersistenceMode.FILE;
+        }
+    }
+
+    private static Optional<String> resolveProperty(String systemProperty, String envVariable) {
+        String sysValue = System.getProperty(systemProperty);
+        if (sysValue != null && !sysValue.isBlank()) {
+            return Optional.of(sysValue);
+        }
+        String envValue = System.getenv(envVariable);
+        if (envValue != null && !envValue.isBlank()) {
+            return Optional.of(envValue);
+        }
+        String fileValue = FILE_PROPERTIES.getProperty(systemProperty);
+        if (fileValue != null && !fileValue.isBlank()) {
+            return Optional.of(fileValue);
+        }
+        return Optional.empty();
+    }
+
+    private static long parseLongSafely(String value) {
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return DEFAULT_AUTO_SAVE_INTERVAL;
+        }
+    }
+
+    private static Properties loadFileProperties() {
+        Properties props = new Properties();
+
+        for (String resource : PROPERTY_CANDIDATES) {
+            loadFromClasspath(resource, props);
+        }
+
+        for (String resource : PROPERTY_CANDIDATES) {
+            loadFromFileSystem(resource, props);
+        }
+
+        return props;
+    }
+
+    private static void loadFromClasspath(String resource, Properties props) {
+        try (InputStream stream = AppConfig.class.getClassLoader().getResourceAsStream(resource)) {
+            if (stream != null) {
+                props.load(stream);
+            }
+        } catch (IOException ignored) {
+            // If the resource cannot be read we silently fall back to other sources.
+        }
+    }
+
+    private static void loadFromFileSystem(String resource, Properties props) {
+        Path path = Path.of(resource);
+        if (Files.exists(path)) {
+            try (InputStream stream = Files.newInputStream(path)) {
+                props.load(stream);
+            } catch (IOException ignored) {
+                // If the file cannot be read we silently fall back to other sources.
+            }
+        }
+    }
+}
